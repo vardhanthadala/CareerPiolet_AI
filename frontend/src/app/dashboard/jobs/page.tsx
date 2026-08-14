@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
   MapPin,
@@ -28,16 +28,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { searchJobs, saveJob, unsaveJob, setAuthToken } from "@/lib/api";
+import { searchJobs, saveJob, unsaveJob, getSavedJobs, setAuthToken } from "@/lib/api";
 import Link from "next/link";
 
 export default function JobsPage() {
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState("");
   const [workplaceType, setWorkplaceType] = useState("");
   const [postedWithin, setPostedWithin] = useState("");
   const [page, setPage] = useState(1);
-  const [savedJobs, setSavedJobs] = useState<Set<string>>(new Set());
+
+  const { data: savedData } = useQuery({
+    queryKey: ["saved-jobs"],
+    queryFn: getSavedJobs,
+  });
+
+  const savedJobIds = new Set(
+    Array.isArray(savedData) ? savedData.map((s: any) => s.jobId || s.job?.id) : []
+  );
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["jobs", query, location, workplaceType, postedWithin, page],
@@ -63,19 +72,14 @@ export default function JobsPage() {
 
   const toggleSave = async (jobId: string) => {
     try {
-      if (savedJobs.has(jobId)) {
+      if (savedJobIds.has(jobId)) {
         await unsaveJob(jobId);
-        setSavedJobs((prev) => {
-          const next = new Set(prev);
-          next.delete(jobId);
-          return next;
-        });
       } else {
         await saveJob(jobId);
-        setSavedJobs((prev) => new Set(prev).add(jobId));
       }
-    } catch {
-      // Handle error silently for now
+      queryClient.invalidateQueries({ queryKey: ["saved-jobs"] });
+    } catch (e) {
+      console.error("Save job error:", e);
     }
   };
 
@@ -268,7 +272,7 @@ export default function JobsPage() {
                         onClick={() => toggleSave(job.id)}
                         className="h-9 w-9"
                       >
-                        {savedJobs.has(job.id) ? (
+                        {savedJobIds.has(job.id) ? (
                           <BookmarkCheck className="h-4 w-4 text-[#111827]" />
                         ) : (
                           <Bookmark className="h-4 w-4 text-slate-400 group-hover:text-[#111827] transition-colors" />

@@ -18,12 +18,38 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { getJob, setAuthToken } from "@/lib/api";
+import { getJob, saveJob, unsaveJob, getSavedJobs, setAuthToken } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 
 export default function JobDetailPage() {
   const params = useParams();
   const jobId = params.id as string;
+  const queryClient = useQueryClient();
+
+  const { data: savedData } = useQuery({
+    queryKey: ["saved-jobs"],
+    queryFn: getSavedJobs,
+  });
+
+  const savedJobIds = new Set(
+    Array.isArray(savedData) ? savedData.map((s: any) => s.jobId || s.job?.id) : []
+  );
+
+  const isSaved = savedJobIds.has(jobId);
+
+  const toggleSave = async () => {
+    try {
+      if (isSaved) {
+        await unsaveJob(jobId);
+      } else {
+        await saveJob(jobId);
+      }
+      queryClient.invalidateQueries({ queryKey: ["saved-jobs"] });
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const { data: job, isLoading } = useQuery({
     queryKey: ["job", jobId],
@@ -128,8 +154,8 @@ export default function JobDetailPage() {
               </div>
 
               <div className="flex gap-2 shrink-0">
-                <Button variant="outline" size="icon">
-                  <Bookmark className="h-4 w-4" />
+                <Button variant="outline" size="icon" onClick={toggleSave}>
+                  <Bookmark className={`h-4 w-4 ${isSaved ? 'text-[#111827] fill-current' : 'text-slate-500'}`} />
                 </Button>
                 {job.applicationUrl && (
                   <a
