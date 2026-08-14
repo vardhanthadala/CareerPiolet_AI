@@ -7,14 +7,13 @@ import axios from 'axios';
 @Injectable()
 export class AdzunaService {
   private readonly logger = new Logger(AdzunaService.name);
-  private readonly apiUrl = 'https://api.adzuna.com/v1/api/jobs/us/search/1';
   private readonly appId = process.env.ADZUNA_APP_ID;
   private readonly appKey = process.env.ADZUNA_APP_KEY;
 
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Search jobs via Adzuna API and store them.
+   * Search jobs via Adzuna API for US and UK locations and store them.
    */
   async searchAndStore(query: string, resultsPerPage = 20): Promise<{ fetched: number; new: number; updated: number }> {
     if (!this.appId || !this.appKey) {
@@ -22,63 +21,72 @@ export class AdzunaService {
       return { fetched: 0, new: 0, updated: 0 };
     }
 
-    try {
-      this.logger.log(`Searching Adzuna for: "${query}"`);
-      
-      const response = await axios.get(this.apiUrl, {
-        params: {
-          app_id: this.appId,
-          app_key: this.appKey,
-          results_per_page: resultsPerPage,
-          what: query,
-        }
-      });
+    const countries = [
+      { code: 'us', currency: 'USD' },
+      { code: 'gb', currency: 'GBP' },
+    ];
 
-      const data = response.data?.results || [];
-      this.logger.log(`Adzuna returned ${data.length} jobs for query "${query}"`);
+    let totalFetched = 0;
+    let totalNew = 0;
+    let totalUpdated = 0;
 
-      let newCount = 0;
-      let updatedCount = 0;
+    for (const country of countries) {
+      try {
+        const apiUrl = `https://api.adzuna.com/v1/api/jobs/${country.code}/search/1`;
+        this.logger.log(`Searching Adzuna (${country.code.toUpperCase()}) for: "${query}"`);
 
-      for (const job of data) {
-        // Format the job
-        const employerName = job.company?.display_name || 'Unknown Company';
-        
-        // Find or create company
-        let company = await this.prisma.company.findFirst({
-          where: {
-            atsType: AtsType.ADZUNA,
-            atsIdentifier: employerName,
-          }
+        const response = await axios.get(apiUrl, {
+          params: {
+            app_id: this.appId,
+            app_key: this.appKey,
+            results_per_page: Math.ceil(resultsPerPage / 2),
+            what: query,
+          },
         });
 
-        if (!company) {
-          company = await this.prisma.company.create({
-            data: {
-              name: employerName,
+        const data = response.data?.results || [];
+        this.logger.log(`Adzuna (${country.code.toUpperCase()}) returned ${data.length} jobs for query "${query}"`);
+        totalFetched += data.length;
+
+        for (const job of data) {
+          // Format the job
+          const employerName = job.company?.display_name || 'Unknown Company';
+
+          // Find or create company
+          let company = await this.prisma.company.findFirst({
+            where: {
               atsType: AtsType.ADZUNA,
               atsIdentifier: employerName,
-            }
+            },
           });
-        }
 
-        // Normalize job data
-        const normalizedJob: NormalizedJob = {
-          source: 'adzuna',
-          externalId: job.id.toString(),
-          title: job.title,
-          company: company.id,
-          location: job.location?.display_name || 'Unknown',
-          workplaceType: undefined, // Adzuna doesn't always specify
-          description: job.description || '',
-          descriptionPlain: job.description || '',
-          salaryMin: job.salary_min || null,
-          salaryMax: job.salary_max || null,
-          salaryCurrency: 'USD',
-          jobUrl: job.redirect_url,
-          applicationUrl: job.redirect_url,
-          postedAt: job.created ? new Date(job.created) : undefined,
-        };
+          if (!company) {
+            company = await this.prisma.company.create({
+              data: {
+                name: employerName,
+                atsType: AtsType.ADZUNA,
+                atsIdentifier: employerName,
+              },
+            });
+          }
+
+          // Normalize job data
+          const normalizedJob: NormalizedJob = {
+            source: 'adzuna',
+            externalId: job.id.toString(),
+            title: job.title,
+            company: company.id,
+            location: `${job.location?.display_name || 'Unknown'}, ${country.code.toUpperCase()}`,
+            workplaceType: undefined, // Adzuna doesn't always specify
+            description: job.description || '',
+            descriptionPlain: job.description || '',
+            salaryMin: job.salary_min || null,
+            salaryMax: job.salary_max || null,
+            salaryCurrency: country.currency,
+            jobUrl: job.redirect_url,
+            applicationUrl: job.redirect_url,
+            postedAt: job.created ? new Date(job.created) : undefined,
+          };
 
         // Upsert job
         try {
@@ -126,19 +134,19 @@ export class AdzunaService {
             result.createdAt.getTime() === result.updatedAt.getTime() ||
             new Date().getTime() - result.createdAt.getTime() < 5000
           ) {
-            newCount++;
+            totalNew++;
           } else {
-            updatedCount++;
+            totalUpdated++;
           }
         } catch (jobError: any) {
           this.logger.error(`Failed to store Adzuna job ${normalizedJob.externalId}: ${jobError.message}`);
         }
       }
-
-      return { fetched: data.length, new: newCount, updated: updatedCount };
     } catch (error: any) {
-      this.logger.error(`Error fetching from Adzuna: ${error.message}`);
-      return { fetched: 0, new: 0, updated: 0 };
+      this.logger.error(`Error fetching from Adzuna (${country.code.toUpperCase()}): ${error.message}`);
     }
   }
+
+  return { fetched: totalFetched, new: totalNew, updated: totalUpdated };
+}
 }
