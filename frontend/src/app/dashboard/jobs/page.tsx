@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Briefcase,
   Clock,
+  CheckCircle2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { searchJobs, saveJob, unsaveJob, getSavedJobs, setAuthToken } from "@/lib/api";
+import { searchJobs, saveJob, unsaveJob, getSavedJobs, getMyApplications, setAuthToken } from "@/lib/api";
 import Link from "next/link";
 
 export default function JobsPage() {
@@ -38,15 +39,35 @@ export default function JobsPage() {
   const [workplaceType, setWorkplaceType] = useState("");
   const [postedWithin, setPostedWithin] = useState("");
   const [page, setPage] = useState(1);
+  const [hideApplied, setHideApplied] = useState(false);
 
   const { data: savedData } = useQuery({
     queryKey: ["saved-jobs"],
     queryFn: getSavedJobs,
   });
 
-  const savedJobIds = new Set(
-    Array.isArray(savedData) ? savedData.map((s: any) => s.jobId || s.job?.id) : []
-  );
+  // Fetch real application statuses from the Applications table
+  const { data: applicationsData } = useQuery({
+    queryKey: ["my-applications"],
+    queryFn: getMyApplications,
+  });
+
+  // Map jobId -> application status (e.g. "APPLIED", "INTERVIEW", "OFFER")
+  const applicationStatusMap = new Map<string, string>();
+  if (Array.isArray(applicationsData)) {
+    applicationsData.forEach((app: any) => {
+      if (app.jobId) applicationStatusMap.set(app.jobId, app.status);
+    });
+  }
+
+  // Saved job IDs (bookmarks) — separate from applied status
+  const savedJobIds = new Set<string>();
+  if (Array.isArray(savedData)) {
+    savedData.forEach((s: any) => {
+      const id = s.jobId || s.job?.id;
+      if (id) savedJobIds.add(id);
+    });
+  }
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["jobs", query, location, workplaceType, postedWithin, page],
@@ -61,8 +82,26 @@ export default function JobsPage() {
       }),
   });
 
-  const jobs = data?.jobs || [];
+  const rawJobs = data?.jobs || [];
   const pagination = data?.pagination || { page: 1, totalPages: 1, total: 0 };
+
+  // Filter out or sort applied jobs to bottom
+  let displayJobs = [...rawJobs];
+  if (hideApplied) {
+    displayJobs = displayJobs.filter((job: any) => {
+      const st = applicationStatusMap.get(job.id);
+      return !st || st === "SAVED" || st === "PREPARING";
+    });
+  }
+
+  // Sort unapplied jobs first
+  displayJobs.sort((a: any, b: any) => {
+    const aApplied = ["APPLIED", "INTERVIEW", "OFFER", "ASSESSMENT"].includes(applicationStatusMap.get(a.id) || "");
+    const bApplied = ["APPLIED", "INTERVIEW", "OFFER", "ASSESSMENT"].includes(applicationStatusMap.get(b.id) || "");
+    if (aApplied && !bApplied) return 1;
+    if (!aApplied && bApplied) return -1;
+    return 0;
+  });
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,8 +206,20 @@ export default function JobsPage() {
               </SelectContent>
             </Select>
             <Button
+              type="button"
+              variant={hideApplied ? "default" : "outline"}
+              onClick={() => setHideApplied(!hideApplied)}
+              className={`h-10 text-xs font-medium rounded-lg transition-all ${
+                hideApplied
+                  ? "bg-slate-900 text-white hover:bg-slate-800"
+                  : "border-slate-200/80 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {hideApplied ? "Showing Unapplied Jobs" : "Hide Applied Jobs"}
+            </Button>
+            <Button
               type="submit"
-              className="h-10 px-10 bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition-all font-medium rounded-lg"
+              className="h-10 px-8 bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition-all font-medium rounded-lg"
             >
               <Search className="h-4 w-4 mr-2" />
               Search
@@ -182,7 +233,7 @@ export default function JobsPage() {
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
         </div>
-      ) : jobs.length === 0 ? (
+      ) : displayJobs.length === 0 ? (
         <Card className="bg-white border-slate-200/60 shadow-sm">
           <CardContent className="py-20 text-center">
             <Briefcase className="h-12 w-12 mx-auto text-slate-300 mb-4" />
@@ -196,109 +247,120 @@ export default function JobsPage() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {jobs.map((job: any, i: number) => (
-            <motion.div
-              key={job.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              <Card className="bg-white border-slate-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:border-slate-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300 group">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    {/* Job Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Link
-                          href={`/dashboard/jobs/${job.id}`}
-                          className="text-[17px] font-medium text-[#111827] hover:text-blue-600 transition-colors truncate tracking-tight"
-                        >
-                          {job.title}
-                        </Link>
-                      </div>
+          {displayJobs.map((job: any, i: number) => {
+            const stage = applicationStatusMap.get(job.id);
+            const isApplied = ["APPLIED", "INTERVIEW", "OFFER", "ASSESSMENT"].includes(stage || "");
 
-                      <div className="flex items-center gap-3 text-[13px] font-medium text-slate-500 mb-4">
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-3.5 w-3.5" />
-                          {job.company?.name || job.source}
-                        </span>
-                        {job.location && (
-                          <span className="flex items-center gap-1">
-                            <MapPin className="h-3.5 w-3.5" />
-                            {job.location}
-                          </span>
-                        )}
-                        {job.postedAt && (
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5" />
-                            {formatDate(job.postedAt)}
-                          </span>
-                        )}
-                      </div>
+            return (
+              <motion.div
+                key={job.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+              >
+                <Card className={`bg-white border-slate-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.02)] hover:border-slate-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-300 group ${isApplied ? "opacity-75 bg-slate-50/50" : ""}`}>
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      {/* Job Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <Link
+                            href={`/dashboard/jobs/${job.id}`}
+                            className="text-[17px] font-medium text-[#111827] hover:text-blue-600 transition-colors truncate tracking-tight"
+                          >
+                            {job.title}
+                          </Link>
+                          {isApplied && (
+                            <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[11px] font-semibold px-2 py-0.5 flex items-center gap-1 shrink-0">
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                              {stage}
+                            </Badge>
+                          )}
+                        </div>
 
-                      <div className="flex flex-wrap gap-2">
-                        {job.workplaceType && (
+                        <div className="flex items-center gap-3 text-[13px] font-medium text-slate-500 mb-4">
+                          <span className="flex items-center gap-1">
+                            <Building2 className="h-3.5 w-3.5" />
+                            {job.company?.name || job.source}
+                          </span>
+                          {job.location && (
+                            <span className="flex items-center gap-1">
+                              <MapPin className="h-3.5 w-3.5" />
+                              {job.location}
+                            </span>
+                          )}
+                          {job.postedAt && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3.5 w-3.5" />
+                              {formatDate(job.postedAt)}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {job.workplaceType && (
+                            <Badge
+                              variant="secondary"
+                              className="text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent font-medium"
+                            >
+                              {job.workplaceType}
+                            </Badge>
+                          )}
+                          {job.department && (
+                            <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent font-medium">
+                              {job.department}
+                            </Badge>
+                          )}
+                          {job.commitment && (
+                            <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent font-medium">
+                              {job.commitment}
+                            </Badge>
+                          )}
                           <Badge
-                            variant="secondary"
-                            className="text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent font-medium"
+                            variant="outline"
+                            className="text-xs capitalize text-slate-500 border-slate-200"
                           >
-                            {job.workplaceType}
+                            {job.source}
                           </Badge>
-                        )}
-                        {job.department && (
-                          <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent font-medium">
-                            {job.department}
-                          </Badge>
-                        )}
-                        {job.commitment && (
-                          <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent font-medium">
-                            {job.commitment}
-                          </Badge>
-                        )}
-                        <Badge
-                          variant="outline"
-                          className="text-xs capitalize text-slate-500 border-slate-200"
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => toggleSave(job.id)}
+                          className="h-9 w-9"
                         >
-                          {job.source}
-                        </Badge>
+                          {savedJobIds.has(job.id) ? (
+                            <BookmarkCheck className="h-4 w-4 text-[#111827]" />
+                          ) : (
+                            <Bookmark className="h-4 w-4 text-slate-400 group-hover:text-[#111827] transition-colors" />
+                          )}
+                        </Button>
+                        {job.applicationUrl && (
+                          <a
+                            href={job.applicationUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Button
+                              size="sm"
+                              className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm transition-all font-medium"
+                            >
+                              Apply
+                              <ExternalLink className="ml-1 h-3.5 w-3.5" />
+                            </Button>
+                          </a>
+                        )}
                       </div>
                     </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => toggleSave(job.id)}
-                        className="h-9 w-9"
-                      >
-                        {savedJobIds.has(job.id) ? (
-                          <BookmarkCheck className="h-4 w-4 text-[#111827]" />
-                        ) : (
-                          <Bookmark className="h-4 w-4 text-slate-400 group-hover:text-[#111827] transition-colors" />
-                        )}
-                      </Button>
-                      {job.applicationUrl && (
-                        <a
-                          href={job.applicationUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <Button
-                            size="sm"
-                            className="bg-slate-900 hover:bg-slate-800 text-white border-0 shadow-sm transition-all font-medium"
-                          >
-                            Apply
-                            <ExternalLink className="ml-1 h-3.5 w-3.5" />
-                          </Button>
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
+                  </CardContent>
+                </Card>
+              </motion.div>
+            );
+          })}
         </div>
       )}
 

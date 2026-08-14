@@ -172,4 +172,48 @@ export class JobsService {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  async getMyApplications(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) return [];
+
+    return this.prisma.application.findMany({
+      where: { userId: user.id },
+      select: {
+        jobId: true,
+        status: true,
+        appliedAt: true,
+      },
+    });
+  }
+
+  async updateApplicationStatus(userId: string, jobId: string, status: string) {
+    const user = await this.prisma.user.findUnique({ where: { clerkId: userId } });
+    if (!user) throw new Error('User not found');
+
+    // Ensure candidate profile exists (required for Application relation)
+    let candidate = await this.prisma.candidateProfile.findUnique({
+      where: { userId: user.id },
+    });
+    if (!candidate) {
+      candidate = await this.prisma.candidateProfile.create({
+        data: { userId: user.id },
+      });
+    }
+
+    return this.prisma.application.upsert({
+      where: { candidateId_jobId: { candidateId: candidate.id, jobId } },
+      create: {
+        userId: user.id,
+        candidateId: candidate.id,
+        jobId,
+        status: status as any,
+        appliedAt: status === 'APPLIED' ? new Date() : null,
+      },
+      update: {
+        status: status as any,
+        appliedAt: status === 'APPLIED' ? new Date() : undefined,
+      },
+    });
+  }
 }

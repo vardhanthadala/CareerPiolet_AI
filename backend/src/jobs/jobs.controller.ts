@@ -2,9 +2,11 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Param,
   Query,
+  Body,
   UseGuards,
   NotFoundException,
 } from '@nestjs/common';
@@ -52,6 +54,22 @@ export class JobsController {
   @UseGuards(ClerkAuthGuard)
   async getSavedJobs(@CurrentUser('userId') userId: string) {
     return this.jobsService.getSavedJobs(userId);
+  }
+
+  @Get('my-applications')
+  @UseGuards(ClerkAuthGuard)
+  async getMyApplications(@CurrentUser('userId') userId: string) {
+    return this.jobsService.getMyApplications(userId);
+  }
+
+  @Patch('application-status/:jobId')
+  @UseGuards(ClerkAuthGuard)
+  async updateApplicationStatus(
+    @CurrentUser('userId') userId: string,
+    @Param('jobId') jobId: string,
+    @Body('status') status: string,
+  ) {
+    return this.jobsService.updateApplicationStatus(userId, jobId, status);
   }
 
   @Get(':id')
