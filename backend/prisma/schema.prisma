@@ -1,0 +1,231 @@
+// CareerPilot AI — Prisma Schema
+// PostgreSQL + pgvector
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// User & Authentication
+// ==========================================
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  candidate    CandidateProfile?
+  savedJobs    SavedJob[]
+  applications Application[]
+
+  @@map("users")
+}
+
+// ==========================================
+// Candidate Profile
+// ==========================================
+
+model CandidateProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Basic info
+  headline String?
+  summary  String?
+  phone    String?
+  location String?
+
+  // Professional
+  skills          String[] // Array of skill strings
+  targetRoles     String[] // Desired job titles
+  experienceLevel ExperienceLevel @default(ENTRY)
+  yearsOfExp      Int?
+
+  // Preferences
+  preferredLocations String[]
+  remotePreference   RemotePreference @default(FLEXIBLE)
+  salaryExpMin       Int?
+  salaryExpMax       Int?
+  salaryCurrency     String?          @default("INR")
+  noticePeriod       String?
+  workAuthorization  String?
+
+  // Structured data (stored as JSON)
+  education      Json? // Array of education objects
+  experience     Json? // Array of experience objects
+  projects       Json? // Array of project objects
+  certifications Json? // Array of certification strings
+
+  // Resume
+  resumeUrl      String?
+  resumeParsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  applications Application[]
+
+  @@map("candidate_profiles")
+}
+
+enum ExperienceLevel {
+  INTERN
+  ENTRY
+  MID
+  SENIOR
+  LEAD
+  MANAGER
+  DIRECTOR
+  EXECUTIVE
+}
+
+enum RemotePreference {
+  ONSITE
+  REMOTE
+  HYBRID
+  FLEXIBLE
+}
+
+// ==========================================
+// Companies
+// ==========================================
+
+model Company {
+  id            String   @id @default(cuid())
+  name          String
+  atsType       AtsType
+  atsIdentifier String // e.g., "microsoft" for greenhouse
+  careersUrl    String?
+  logoUrl       String?
+  description   String?
+  active        Boolean  @default(true)
+  lastFetchedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  jobs Job[]
+
+  @@unique([atsType, atsIdentifier])
+  @@map("companies")
+}
+
+enum AtsType {
+  GREENHOUSE
+  LEVER
+  ASHBY
+  JSEARCH
+  ADZUNA
+}
+
+// ==========================================
+// Jobs
+// ==========================================
+
+model Job {
+  id         String @id @default(cuid())
+  source     String // "greenhouse", "lever", "ashby"
+  externalId String // ID from the source
+
+  title         String
+  companyId     String
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  location      String?
+  workplaceType WorkplaceType?
+  description   String  @db.Text
+  descriptionPlain String? @db.Text // Plain text version for search
+
+  salaryMin      Int?
+  salaryMax      Int?
+  salaryCurrency String?
+
+  jobUrl         String?
+  applicationUrl String?
+
+  department  String?
+  team        String?
+  commitment  String? // Full-time, Part-time, etc.
+
+  postedAt  DateTime?
+  fetchedAt DateTime  @default(now())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  savedBy      SavedJob[]
+  applications Application[]
+
+  @@unique([source, externalId])
+  @@index([title])
+  @@index([companyId])
+  @@index([location])
+  @@index([postedAt])
+  @@map("jobs")
+}
+
+enum WorkplaceType {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+// ==========================================
+// Saved Jobs
+// ==========================================
+
+model SavedJob {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, jobId])
+  @@map("saved_jobs")
+}
+
+// ==========================================
+// Applications
+// ==========================================
+
+model Application {
+  id          String            @id @default(cuid())
+  candidateId String
+  candidate   CandidateProfile  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  status        ApplicationStatus @default(SAVED)
+  appliedAt     DateTime?
+  resumeVersion String?
+  coverLetter   String?           @db.Text
+  notes         String?           @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([candidateId, jobId])
+  @@map("applications")
+}
+
+enum ApplicationStatus {
+  SAVED
+  PREPARING
+  APPLIED
+  ASSESSMENT
+  INTERVIEW
+  OFFER
+  REJECTED
+  WITHDRAWN
+}
