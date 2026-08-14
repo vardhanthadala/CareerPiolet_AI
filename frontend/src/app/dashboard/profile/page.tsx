@@ -15,6 +15,9 @@ import {
   Code,
   Target,
   DollarSign,
+  Upload,
+  FileText,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,12 +32,43 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getMyProfile, updateMyProfile, setAuthToken, getMe } from "@/lib/api";
+import { getMyProfile, updateMyProfile, setAuthToken, getMe, uploadAndParseResume } from "@/lib/api";
 
 export default function ProfilePage() {
   const [newSkill, setNewSkill] = useState("");
   const [newRole, setNewRole] = useState("");
   const [newLocation, setNewLocation] = useState("");
+  const [isParsingResume, setIsParsingResume] = useState(false);
+  const [parseSuccess, setParseSuccess] = useState(false);
+
+  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsParsingResume(true);
+      setParseSuccess(false);
+      const parsed = await uploadAndParseResume(file);
+
+      setForm((prev) => ({
+        ...prev,
+        headline: parsed.headline || prev.headline,
+        summary: parsed.summary || prev.summary,
+        phone: parsed.phone || prev.phone,
+        skills: Array.from(new Set([...prev.skills, ...(parsed.skills || [])])),
+        targetRoles: Array.from(new Set([...prev.targetRoles, ...(parsed.targetRoles || [])])),
+        experienceLevel: parsed.experienceLevel || prev.experienceLevel,
+        yearsOfExp: parsed.yearsOfExp || prev.yearsOfExp,
+      }));
+
+      setParseSuccess(true);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse resume PDF. Please check if the AI service is running.");
+    } finally {
+      setIsParsingResume(false);
+    }
+  };
 
   const [form, setForm] = useState({
     headline: "",
@@ -162,6 +196,66 @@ export default function ProfilePage() {
           ✓ Profile saved successfully!
         </motion.div>
       )}
+
+      {parseSuccess && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-600 text-sm flex items-center gap-2"
+        >
+          <Sparkles className="h-4 w-4 text-blue-500" />
+          Resume analyzed! Your profile fields below have been auto-filled by Google Gemini AI.
+        </motion.div>
+      )}
+
+      {/* Upload Resume AI Card */}
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <Card className="bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-purple-50/80 border border-blue-100 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.02)]">
+          <CardContent className="p-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-white shadow-sm border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                    Auto-Fill Profile with AI Resume Parser
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Upload your PDF resume to extract skills, headline, experience, and target roles automatically using Gemini AI.
+                  </p>
+                </div>
+              </div>
+
+              <div className="relative shrink-0 w-full md:w-auto">
+                <input
+                  type="file"
+                  accept=".pdf"
+                  onChange={handleResumeUpload}
+                  disabled={isParsingResume}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
+                />
+                <Button
+                  disabled={isParsingResume}
+                  className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all flex items-center justify-center gap-2"
+                >
+                  {isParsingResume ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Parsing with Gemini AI...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" />
+                      Upload Resume (PDF)
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {/* Basic Info */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>

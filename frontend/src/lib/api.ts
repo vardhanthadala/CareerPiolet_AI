@@ -101,3 +101,15 @@ export async function getMe() {
   const { data } = await api.get("/users/me");
   return data;
 }
+
+// ---- AI Resume Parser API ----
+
+export async function uploadAndParseResume(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const aiUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:8000";
+  const { data } = await axios.post(`${aiUrl}/ai/parse-resume`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
