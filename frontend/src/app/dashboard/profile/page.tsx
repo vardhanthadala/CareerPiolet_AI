@@ -201,28 +201,28 @@ export default function ProfilePage() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-600 text-sm flex items-center gap-2"
+          className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200/60 text-emerald-700 text-[14px] font-medium flex items-center gap-2.5"
         >
-          <Sparkles className="h-4 w-4 text-blue-500" />
-          Resume analyzed! Your profile fields below have been auto-filled by Google Gemini AI.
+          <Sparkles className="h-4 w-4 text-emerald-600 shrink-0" />
+          Resume analyzed! Your profile fields below have been auto-filled by Gemini AI.
         </motion.div>
       )}
 
       {/* Upload Resume AI Card */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-        <Card className="bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-purple-50/80 border border-blue-100 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.02)]">
+        <Card className="bg-white border-slate-200/60 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.02)] rounded-2xl">
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-xl bg-white shadow-sm border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-                  <Sparkles className="h-6 w-6" />
+                <div className="h-10 w-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shrink-0 shadow-sm">
+                  <Sparkles className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                  <h3 className="text-[15px] font-semibold text-[#111827] flex items-center gap-2">
                     Auto-Fill Profile with AI Resume Parser
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Upload your PDF resume to extract skills, headline, experience, and target roles automatically using Gemini AI.
+                  <p className="text-[13px] text-slate-500 mt-0.5 leading-normal">
+                    Upload your PDF resume to extract skills, headline, experience, and target roles automatically.
                   </p>
                 </div>
               </div>
@@ -237,11 +237,11 @@ export default function ProfilePage() {
                 />
                 <Button
                   disabled={isParsingResume}
-                  className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all flex items-center justify-center gap-2"
+                  className="w-full md:w-auto bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-5 py-2.5 text-[14px] font-medium border-0 shadow-sm transition-all flex items-center justify-center gap-2"
                 >
                   {isParsingResume ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
                       Parsing with Gemini AI...
                     </>
                   ) : (
