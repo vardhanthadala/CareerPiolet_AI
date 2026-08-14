@@ -9,7 +9,7 @@ import asyncio
 from google import genai
 from app.core.config import get_settings
 
-router = APIRouter(tags=["Resume Parsing"])
+router = APIRouter(prefix="/ai", tags=["Resume Parsing"])
 settings = get_settings()
 COMMON_SKILLS = [
     "React", "Next.js", "JavaScript", "TypeScript", "Python", "Java", "SQL",

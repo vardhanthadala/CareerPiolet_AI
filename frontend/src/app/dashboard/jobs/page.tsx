@@ -29,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { searchJobs, saveJob, unsaveJob, getSavedJobs, getMyApplications, setAuthToken } from "@/lib/api";
+import { searchJobs, saveJob, unsaveJob, getSavedJobs, getMyApplications, getMyProfile, setAuthToken } from "@/lib/api";
 import Link from "next/link";
 
 export default function JobsPage() {
@@ -40,6 +40,46 @@ export default function JobsPage() {
   const [postedWithin, setPostedWithin] = useState("");
   const [page, setPage] = useState(1);
   const [hideApplied, setHideApplied] = useState(false);
+
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: getMyProfile,
+  });
+
+  const calculateMatchScore = (job: any) => {
+    if (!profile) return null;
+    
+    let score = 35; // Base score for showing up in search
+
+    const titleLower = (job.title || "").toLowerCase();
+    const textToSearch = `${job.title} ${job.description} ${job.skills || ""}`.toLowerCase();
+
+    // 1. Role / Title matching (+25 points max)
+    if (profile.targetRoles && profile.targetRoles.length > 0) {
+      const roleMatch = profile.targetRoles.some((role: string) => 
+        titleLower.includes(role.toLowerCase()) || role.toLowerCase().includes(titleLower)
+      );
+      if (roleMatch) score += 25;
+      else {
+        // partial word match
+        const hasPartial = profile.targetRoles.some((role: string) => {
+           const words = role.toLowerCase().split(' ');
+           return words.some(w => w.length > 3 && titleLower.includes(w));
+        });
+        if (hasPartial) score += 15;
+      }
+    } else if (profile.headline) {
+      if (profile.headline.toLowerCase().includes(titleLower)) score += 20;
+    }
+
+    // 2. Skills matching (+40 points max)
+    if (profile.skills && profile.skills.length > 0) {
+      const matchedSkills = profile.skills.filter((sk: string) => sk.length > 1 && textToSearch.includes(sk.toLowerCase()));
+      score += Math.min(40, matchedSkills.length * 8);
+    }
+
+    return Math.min(98, score);
+  };
 
   const { data: savedData } = useQuery({
     queryKey: ["saved-jobs"],
@@ -250,6 +290,7 @@ export default function JobsPage() {
           {displayJobs.map((job: any, i: number) => {
             const stage = applicationStatusMap.get(job.id);
             const isApplied = ["APPLIED", "INTERVIEW", "OFFER", "ASSESSMENT"].includes(stage || "");
+            const matchScore = calculateMatchScore(job);
 
             return (
               <motion.div
@@ -270,6 +311,17 @@ export default function JobsPage() {
                           >
                             {job.title}
                           </Link>
+                          
+                          {matchScore !== null && matchScore > 0 && (
+                            <Badge className={`border px-2 py-0.5 text-[11px] font-semibold flex items-center gap-1 shrink-0 ${
+                              matchScore >= 80 ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80' : 
+                              matchScore >= 50 ? 'bg-yellow-50 text-yellow-700 border-yellow-200/80' : 
+                              'bg-slate-50 text-slate-700 border-slate-200/80'
+                            }`}>
+                              {matchScore}% Match
+                            </Badge>
+                          )}
+
                           {isApplied && (
                             <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[11px] font-semibold px-2 py-0.5 flex items-center gap-1 shrink-0">
                               <CheckCircle2 className="h-3 w-3 text-emerald-600" />

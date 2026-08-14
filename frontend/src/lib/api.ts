@@ -155,7 +155,7 @@ export async function uploadAndParseResume(file: File) {
 
     const { data } = await axios.post(`${aiUrl}/ai/parse-resume`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 5000,
+      timeout: 60000,
     });
     return data;
   } catch (err) {
