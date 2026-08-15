@@ -159,14 +159,24 @@ async def parse_resume(file: UploadFile = File(...)):
             client = genai.Client(api_key=settings.gemini_api_key)
 
             prompt = f"""
-            Extract structured profile data from this resume text.
+            Extract structured profile data from this resume text accurately.
+            
+            CRITICAL RULES:
+            1. "summary": Extract the EXACT verbatim text from the candidate's "Profile Summary", "Professional Summary", "About Me", or "Summary" section in their resume. DO NOT summarize, condense, or rewrite it into 2-3 sentences. Copy their exact words directly. If no summary section exists, leave it as an empty string.
+            2. "headline": Extract the exact professional headline / role title directly under their name (e.g. "Software Engineer — Full Stack Developer — GenAI Engineer").
+            3. "name": Full name of the candidate.
+            4. "skills": List of technical skills, languages, frameworks, and databases mentioned.
+            5. "targetRoles": Relevant job titles matching their headline and background.
+            6. "experienceLevel": "ENTRY" | "MID" | "SENIOR" | "LEAD".
+            7. "yearsOfExp": Total estimated years of experience (integer).
+
             Return ONLY a valid JSON object matching this schema:
             {{
               "name": "full name",
               "email": "email address",
               "phone": "phone number",
-              "headline": "exact professional headline e.g. Software Engineer — Full Stack Developer — GenAI Engineer",
-              "summary": "2-3 sentence professional summary",
+              "headline": "exact professional headline",
+              "summary": "exact verbatim text from the candidate's Profile Summary or Professional Summary section",
               "skills": ["skill1", "skill2"],
               "targetRoles": ["role1", "role2"],
               "experienceLevel": "ENTRY" | "MID" | "SENIOR" | "LEAD",
