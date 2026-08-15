@@ -101,14 +101,22 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 def read_docx(contents: bytes) -> str:
-    """Extract text from DOCX/DOC files using standard library zipfile & ET."""
+    """Extract text from DOCX/DOC files while preserving paragraph structure and newlines."""
     try:
         with zipfile.ZipFile(io.BytesIO(contents)) as z:
             xml_content = z.read('word/document.xml')
             tree = ET.fromstring(xml_content)
+            paragraphs = []
+            for p in tree.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
+                texts = [node.text for node in p.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t') if node.text]
+                if texts:
+                    paragraphs.append("".join(texts))
+            if paragraphs:
+                return "\n".join(paragraphs)
             texts = [node.text for node in tree.iter() if node.text]
-            return " ".join(texts)
-    except Exception:
+            return "\n".join(texts)
+    except Exception as e:
+        print(f"read_docx error: {e}")
         return ""
 
 
@@ -159,39 +167,32 @@ async def parse_resume(file: UploadFile = File(...)):
             client = genai.Client(api_key=settings.gemini_api_key)
 
             prompt = f"""
-            Extract structured profile data from this resume text accurately.
+            You are an expert resume parser. Extract structured profile data from this resume text accurately.
             
-            CRITICAL RULES:
-            1. "summary": Extract the EXACT verbatim text from the candidate's "Profile Summary", "Professional Summary", "About Me", or "Summary" section in their resume. DO NOT summarize, condense, or rewrite it into 2-3 sentences. Copy their exact words directly. If no summary section exists, leave it as an empty string.
-            2. "headline": Extract the exact professional headline / role title directly under their name (e.g. "Software Engineer — Full Stack Developer — GenAI Engineer").
-            3. "name": Full name of the candidate.
-            4. "skills": List of technical skills, languages, frameworks, and databases mentioned.
-            5. "targetRoles": Relevant job titles matching their headline and background.
-            6. "experienceLevel": "ENTRY" | "MID" | "SENIOR" | "LEAD".
-            7. "yearsOfExp": Total estimated years of experience (integer).
-
-            Return ONLY a valid JSON object matching this schema:
-            {{
-              "name": "full name",
-              "email": "email address",
-              "phone": "phone number",
-              "headline": "exact professional headline",
-              "summary": "exact verbatim text from the candidate's Profile Summary or Professional Summary section",
-              "skills": ["skill1", "skill2"],
-              "targetRoles": ["role1", "role2"],
-              "experienceLevel": "ENTRY" | "MID" | "SENIOR" | "LEAD",
-              "yearsOfExp": 1
-            }}
+            EXTRACTION RULES:
+            1. summary: Extract the EXACT verbatim text from the candidate's "Profile Summary", "Professional Summary", "About Me", or "Summary" section in their resume. DO NOT summarize, condense, or rewrite it into 2-3 sentences. Copy their exact words directly. If no summary section exists, provide a concise summary based on their experience.
+            2. headline: Extract the exact professional headline / role title directly under their name (e.g. "Software Engineer — Full Stack Developer — GenAI Engineer").
+            3. name: Full name of the candidate.
+            4. email: Candidate's email address.
+            5. phone: Candidate's phone number.
+            6. skills: Array of all technical skills, programming languages, frameworks, libraries, tools, and databases mentioned in the resume.
+            7. targetRoles: Array of relevant target job titles matching their headline and background (e.g. ["Software Engineer", "Full Stack Developer", "GenAI Engineer"]).
+            8. experienceLevel: Must be one of: "ENTRY", "MID", "SENIOR", "LEAD".
+            9. yearsOfExp: Integer representing total estimated years of experience.
 
             Resume Text:
             {extracted_text[:4000]}
             """
-            # Run in thread with 10.0 second strict timeout to prevent hangs
+            
+            # Use application/json mode for 100% reliable JSON generation
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     client.models.generate_content,
                     model="gemini-3-flash-preview",
                     contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
                 ),
                 timeout=30.0
             )
@@ -204,17 +205,39 @@ async def parse_resume(file: UploadFile = File(...)):
                 text_resp = text_resp[:-3]
 
             parsed_data = json.loads(text_resp.strip())
-            # Only backfill email and phone from regex — everything else comes from AI
+
+            # Backfill any missing fields from fallback regex
             if not parsed_data.get("email") and smart_data.get("email"):
                 parsed_data["email"] = smart_data["email"]
             if not parsed_data.get("phone") and smart_data.get("phone"):
                 parsed_data["phone"] = smart_data["phone"]
+            if not parsed_data.get("summary") and smart_data.get("summary"):
+                parsed_data["summary"] = smart_data["summary"]
+            if (not parsed_data.get("skills") or len(parsed_data.get("skills", [])) == 0) and smart_data.get("skills"):
+                parsed_data["skills"] = smart_data["skills"]
 
             return ParseResumeResponse(**parsed_data)
 
         except Exception as gemini_err:
-            print(f"Gemini API parse timeout or error: {gemini_err}")
-            return ParseResumeResponse(**smart_data)
+            print(f"Gemini API parse error: {gemini_err}")
+            # Try fallback model if preview fails
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        client.models.generate_content,
+                        model="gemini-2.5-flash",
+                        contents=prompt,
+                        config=genai.types.GenerateContentConfig(
+                            response_mime_type="application/json"
+                        )
+                    ),
+                    timeout=20.0
+                )
+                parsed_data = json.loads(response.text.strip())
+                return ParseResumeResponse(**parsed_data)
+            except Exception as fb_err:
+                print(f"Fallback model error: {fb_err}")
+                return ParseResumeResponse(**smart_data)
 
     except Exception as e:
         print(f"PDF extract error: {e}")
