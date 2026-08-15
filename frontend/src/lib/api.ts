@@ -149,18 +149,19 @@ export async function uploadAndParseResume(file: File) {
     const formData = new FormData();
     formData.append("file", file);
     
-    let aiUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:8000";
-    if (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+    let aiUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL;
+    if (!aiUrl) {
       aiUrl = "http://localhost:8000";
     }
+    aiUrl = aiUrl.replace(/\/+$/, "");
 
     const { data } = await axios.post(`${aiUrl}/ai/parse-resume`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 60000,
+      timeout: 120000, // 120s to allow for Render free tier cold starts
     });
     return data;
   } catch (err) {
     console.warn("AI service parse failed or timed out:", err);
-    throw new Error("AI resume parsing failed. Please ensure the AI service is running on port 8000 and try again.");
+    throw new Error("AI resume parsing failed. Please check your AI service URL or try again in a few seconds.");
   }
 }
