@@ -344,7 +344,7 @@ export default function ProfilePage() {
                 <div className="relative shrink-0 flex-1 md:flex-initial">
                   <input
                     type="file"
-                    accept=".pdf,.docx,.doc,.txt"
+                    accept=".pdf,.docx,.txt"
                     onChange={handleResumeUpload}
                     disabled={isParsingResume}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"

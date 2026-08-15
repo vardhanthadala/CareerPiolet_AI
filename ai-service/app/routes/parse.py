@@ -6,6 +6,7 @@ import json
 import os
 import re
 import asyncio
+import docx2txt
 from google import genai
 from app.core.config import get_settings
 
@@ -98,23 +99,10 @@ def fallback_extract(text: str) -> dict:
 
 
 import zipfile
-import xml.etree.ElementTree as ET
-
 def read_docx(contents: bytes) -> str:
-    """Extract text from DOCX/DOC files while preserving paragraph structure and newlines."""
+    """Extract text from DOCX files using docx2txt."""
     try:
-        with zipfile.ZipFile(io.BytesIO(contents)) as z:
-            xml_content = z.read('word/document.xml')
-            tree = ET.fromstring(xml_content)
-            paragraphs = []
-            for p in tree.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
-                texts = [node.text for node in p.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t') if node.text]
-                if texts:
-                    paragraphs.append("".join(texts))
-            if paragraphs:
-                return "\n".join(paragraphs)
-            texts = [node.text for node in tree.iter() if node.text]
-            return "\n".join(texts)
+        return docx2txt.process(io.BytesIO(contents))
     except Exception as e:
         print(f"read_docx error: {e}")
         return ""
@@ -137,15 +125,18 @@ async def parse_resume(file: UploadFile = File(...)):
     Parse a resume in PDF, DOCX, DOC, or TXT format using smart text parsing + Google Gemini AI.
     """
     filename_lower = file.filename.lower()
-    allowed_exts = (".pdf", ".docx", ".doc", ".txt")
+    if filename_lower.endswith(".doc"):
+        raise HTTPException(status_code=400, detail="Legacy .doc format is not supported. Please upload as .docx or .pdf.")
+        
+    allowed_exts = (".pdf", ".docx", ".txt")
     if not filename_lower.endswith(allowed_exts):
-        raise HTTPException(status_code=400, detail="Supported formats: PDF, DOCX, DOC, TXT.")
+        raise HTTPException(status_code=400, detail="Supported formats: PDF, DOCX, TXT.")
 
     try:
         contents = await file.read()
         extracted_text = ""
 
-        if filename_lower.endswith((".docx", ".doc")):
+        if filename_lower.endswith(".docx"):
             extracted_text = read_docx(contents)
         elif filename_lower.endswith(".txt"):
             extracted_text = contents.decode("utf-8", errors="ignore")
