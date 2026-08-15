@@ -66,59 +66,32 @@ def calculate_experience(text: str) -> tuple[int, str]:
 
 
 def fallback_extract(text: str) -> dict:
-    """Smart text extraction from raw resume PDF text."""
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-    # Name & Headline from top lines
-    name = lines[0] if lines else "Candidate"
-    headline = ""
-    if len(lines) > 1:
-        headline = lines[1]
-        if len(lines) > 2 and ("Engineer" in lines[2] or "Developer" in lines[2]):
-            headline += " — " + lines[2]
-
-    # Email & Phone regex
+    """Minimal fallback: only extract what regex can reliably find (email, phone, skills)."""
+    # Email & Phone regex — the only things regex can reliably extract
     email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text)
     phone_match = re.search(r'\+?\d[\d\s-]{8,14}\d', text)
 
-    email = email_match.group(0) if email_match else None
-    phone = phone_match.group(0) if phone_match else None
+    email = email_match.group(0) if email_match else ""
+    phone = phone_match.group(0).strip() if phone_match else ""
 
-    # Summary extraction
-    summary = ""
-    if "Profile Summary" in text:
-        after_sum = text.split("Profile Summary", 1)[1]
-        summary = after_sum.split("Professional Experience")[0].strip()
-    elif len(lines) > 3:
-        summary = " ".join(lines[2:6])[:500]
-
-    # Skills extraction
+    # Skills extraction via keyword matching — reliable enough
     found_skills = []
     text_lower = text.lower()
     for sk in COMMON_SKILLS:
         if re.search(r'\b' + re.escape(sk.lower()) + r'\b', text_lower):
             found_skills.append(sk)
 
-    # Target Roles
-    target_roles = []
-    if "Full Stack" in text or "Developer" in text:
-        target_roles.append("Full Stack Developer")
-    if "AI" in text or "GenAI" in text or "LLMs" in text:
-        target_roles.append("GenAI Engineer")
-    if "Software Engineer" in text:
-        target_roles.append("Software Engineer")
-
     # Date range experience calculation
     years, exp_level = calculate_experience(text)
 
     return {
-        "name": name,
+        "name": "",
         "email": email,
         "phone": phone,
-        "headline": headline or "Software Engineer & Full Stack Developer",
-        "summary": summary or text[:250],
+        "headline": "",
+        "summary": "",
         "skills": list(set(found_skills)),
-        "targetRoles": target_roles or ["Software Engineer"],
+        "targetRoles": [],
         "experienceLevel": exp_level,
         "yearsOfExp": years,
     }
@@ -210,7 +183,7 @@ async def parse_resume(file: UploadFile = File(...)):
                     model="gemini-3-flash-preview",
                     contents=prompt,
                 ),
-                timeout=10.0
+                timeout=30.0
             )
             text_resp = response.text.strip()
             if text_resp.startswith("```json"):
@@ -221,10 +194,11 @@ async def parse_resume(file: UploadFile = File(...)):
                 text_resp = text_resp[:-3]
 
             parsed_data = json.loads(text_resp.strip())
-            # Merge with smart_data to ensure no fields are lost
-            for key in ["headline", "summary", "skills", "targetRoles", "phone", "email"]:
-                if not parsed_data.get(key) and smart_data.get(key):
-                    parsed_data[key] = smart_data[key]
+            # Only backfill email and phone from regex — everything else comes from AI
+            if not parsed_data.get("email") and smart_data.get("email"):
+                parsed_data["email"] = smart_data["email"]
+            if not parsed_data.get("phone") and smart_data.get("phone"):
+                parsed_data["phone"] = smart_data["phone"]
 
             return ParseResumeResponse(**parsed_data)
 

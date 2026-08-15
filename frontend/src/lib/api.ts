@@ -126,6 +126,15 @@ export async function updateMyProfile(profile: Record<string, unknown>) {
   return data;
 }
 
+export async function uploadResumeToS3(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post("/candidates/resume", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
 // ---- Users API ----
 
 export async function getMe() {
@@ -134,14 +143,6 @@ export async function getMe() {
 }
 
 // ---- AI Resume Parser API ----
-
-const COMMON_SKILLS = [
-  "React", "Next.js", "JavaScript", "TypeScript", "Python", "Java", "SQL",
-  "FastAPI", "Express.js", "Node.js", "PostgreSQL", "MongoDB", "MySQL",
-  "Tailwind CSS", "HTML", "CSS", "LLMs", "LangChain", "Hugging Face",
-  "Prompt Engineering", "RAG", "Git", "GitHub", "VS Code", "Postman",
-  "REST APIs", "GraphQL", "Docker", "AWS"
-];
 
 export async function uploadAndParseResume(file: File) {
   try {
@@ -159,35 +160,7 @@ export async function uploadAndParseResume(file: File) {
     });
     return data;
   } catch (err) {
-    console.warn("AI service parse failed or timed out. Running client-side text extraction fallback...", err);
-    
-    // Read raw PDF text if available or extract standard candidate keywords
-    let rawText = "";
-    try {
-      rawText = await file.text();
-    } catch {}
-
-    const textLower = rawText.toLowerCase();
-    const extractedSkills = COMMON_SKILLS.filter((sk) =>
-      textLower.includes(sk.toLowerCase())
-    );
-
-    return {
-      name: "Vardhan Thadala",
-      email: "vardhan.thadala23@gmail.com",
-      phone: "+91-8639504644",
-      headline: "Software Engineer — Full Stack Developer — GenAI Engineer",
-      summary:
-        "Full-stack developer specializing in AI-driven applications, with 600+ DSA problems solved on LeetCode/GFG. Designed and deployed platforms serving 500+ users with under 300ms global response times and 35%+ efficiency improvements. Skilled in React, Next.js, FastAPI, and LLMs.",
-      skills: extractedSkills.length > 0 ? extractedSkills : [
-        "React", "Next.js", "FastAPI", "Python", "JavaScript", "Tailwind CSS",
-        "HTML", "Node.js", "Express.js", "PostgreSQL", "MongoDB", "MySQL",
-        "LLMs", "LangChain", "Hugging Face", "Prompt Engineering", "RAG",
-        "Git", "GitHub", "VS Code", "Postman", "REST APIs", "GraphQL"
-      ],
-      targetRoles: ["Full Stack Developer", "GenAI Engineer", "Software Engineer"],
-      experienceLevel: "MID",
-      yearsOfExp: 1,
-    };
+    console.warn("AI service parse failed or timed out:", err);
+    throw new Error("AI resume parsing failed. Please ensure the AI service is running on port 8000 and try again.");
   }
 }

@@ -48,37 +48,70 @@ export default function JobsPage() {
 
   const calculateMatchScore = (job: any) => {
     if (!profile) return null;
-    
-    let score = 35; // Base score for showing up in search
 
-    const titleLower = (job.title || "").toLowerCase();
-    const textToSearch = `${job.title} ${job.description} ${job.skills || ""}`.toLowerCase();
+    let score = 40; // Base baseline score
 
-    // 1. Role / Title matching (+25 points max)
+    const getCompanyStr = (comp: any): string => {
+      if (!comp) return "";
+      if (typeof comp === "string") return comp;
+      if (typeof comp === "object") return comp.display_name || comp.name || "";
+      return String(comp);
+    };
+
+    const companyStr = getCompanyStr(job.company);
+    const titleStr = typeof job.title === "string" ? job.title : "";
+    const descStr = typeof job.description === "string" ? job.description : "";
+    const skillsStr = Array.isArray(job.skills) ? job.skills.join(" ") : (typeof job.skills === "string" ? job.skills : "");
+
+    const titleLower = titleStr.toLowerCase();
+    const companyLower = companyStr.toLowerCase();
+    const textToSearch = `${titleStr} ${descStr} ${skillsStr} ${companyStr}`.toLowerCase();
+
+    // 1. Role & Title Direct & Semantic Matching (+35 points max)
     if (profile.targetRoles && profile.targetRoles.length > 0) {
-      const roleMatch = profile.targetRoles.some((role: string) => 
-        titleLower.includes(role.toLowerCase()) || role.toLowerCase().includes(titleLower)
-      );
-      if (roleMatch) score += 25;
-      else {
-        // partial word match
+      const exactRoleMatch = profile.targetRoles.some((role: string) => {
+        const rLower = role.toLowerCase().trim();
+        return titleLower === rLower || titleLower.includes(rLower) || rLower.includes(titleLower);
+      });
+
+      if (exactRoleMatch) {
+        score += 35;
+      } else {
+        // Multi-word partial match
         const hasPartial = profile.targetRoles.some((role: string) => {
-           const words = role.toLowerCase().split(' ');
-           return words.some(w => w.length > 3 && titleLower.includes(w));
+          const words = role.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+          const matchedWords = words.filter((w) => titleLower.includes(w));
+          return matchedWords.length > 0;
         });
-        if (hasPartial) score += 15;
+        if (hasPartial) score += 20;
       }
     } else if (profile.headline) {
-      if (profile.headline.toLowerCase().includes(titleLower)) score += 20;
+      const hLower = profile.headline.toLowerCase();
+      if (hLower.includes(titleLower) || titleLower.includes("engineer") || titleLower.includes("developer")) {
+        score += 25;
+      }
     }
 
-    // 2. Skills matching (+40 points max)
+    // 2. Core Tech Stack & Skills Matching (+25 points max)
     if (profile.skills && profile.skills.length > 0) {
-      const matchedSkills = profile.skills.filter((sk: string) => sk.length > 1 && textToSearch.includes(sk.toLowerCase()));
-      score += Math.min(40, matchedSkills.length * 8);
+      const matchedSkills = profile.skills.filter((sk: string) => {
+        const s = sk.toLowerCase().trim();
+        return s.length > 1 && textToSearch.includes(s);
+      });
+
+      if (matchedSkills.length > 0) {
+        score += Math.min(25, matchedSkills.length * 6);
+      } else {
+        // Common software engineering keywords baseline boost if candidate is a developer
+        const devKeywords = ["software", "engineer", "developer", "full stack", "frontend", "backend", "web", "react", "python", "java", "node"];
+        const devHits = devKeywords.filter((k) => textToSearch.includes(k) && (profile.headline || "").toLowerCase().includes(k));
+        if (devHits.length > 0) {
+          score += Math.min(15, devHits.length * 5);
+        }
+      }
     }
 
-    return Math.min(98, score);
+    return Math.min(95, Math.max(35, Math.round(score)));
   };
 
   const { data: savedData } = useQuery({

@@ -5,7 +5,11 @@ import {
   Put,
   Body,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CandidatesService } from './candidates.service';
 import { CreateCandidateDto } from './dto/create-candidate.dto';
 import { UpdateCandidateDto } from './dto/update-candidate.dto';
@@ -36,5 +40,17 @@ export class CandidatesController {
     @Body() dto: UpdateCandidateDto,
   ) {
     return this.candidatesService.update(userId, dto);
+  }
+
+  @Post('resume')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadResume(
+    @CurrentUser('userId') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No resume file provided');
+    }
+    return this.candidatesService.uploadResumeFile(userId, file);
   }
 }

@@ -2,10 +2,14 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCandidateDto } from './dto/create-candidate.dto';
 import { UpdateCandidateDto } from './dto/update-candidate.dto';
+import { S3StorageService } from './s3-storage.service';
 
 @Injectable()
 export class CandidatesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private s3Storage: S3StorageService,
+  ) {}
 
   async create(userId: string, dto: CreateCandidateDto) {
     // First ensure user exists
@@ -62,5 +66,30 @@ export class CandidatesService {
     }
 
     return candidate;
+  }
+
+  /**
+   * Uploads resume to AWS S3 and records the S3 URL in candidate_profiles.resumeUrl
+   */
+  async uploadResumeFile(clerkId: string, file: Express.Multer.File) {
+    const candidate = await this.getOrCreate(clerkId);
+
+    // 1. Upload to AWS S3
+    const { url } = await this.s3Storage.uploadResume(candidate.userId, file);
+
+    // 2. Persist in Database
+    const updated = await this.prisma.candidateProfile.update({
+      where: { id: candidate.id },
+      data: {
+        resumeUrl: url,
+        resumeParsedAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      resumeUrl: updated.resumeUrl,
+      resumeParsedAt: updated.resumeParsedAt,
+    };
   }
 }

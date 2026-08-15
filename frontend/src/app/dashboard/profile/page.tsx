@@ -20,6 +20,7 @@ import {
   Sparkles,
   CheckCircle2,
   Eye,
+  ExternalLink,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,7 +35,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getMyProfile, updateMyProfile, setAuthToken, getMe, uploadAndParseResume } from "@/lib/api";
+import { getMyProfile, updateMyProfile, setAuthToken, getMe, uploadAndParseResume, uploadResumeToS3 } from "@/lib/api";
+import mammoth from "mammoth";
+import { ResumeViewerModal } from "@/components/ResumeViewerModal";
 
 export default function ProfilePage() {
   const [newSkill, setNewSkill] = useState("");
@@ -44,6 +47,10 @@ export default function ProfilePage() {
   const [parseSuccess, setParseSuccess] = useState(false);
   const [extractedData, setExtractedData] = useState<any>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [resumeUrl, setResumeUrl] = useState<string | null>(null);
+  const [resumeDocxHtml, setResumeDocxHtml] = useState<string | null>(null);
+  const [resumeFileName, setResumeFileName] = useState<string>("");
+  const [showResumeModal, setShowResumeModal] = useState(false);
 
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -52,6 +59,42 @@ export default function ProfilePage() {
     try {
       setIsParsingResume(true);
       setParseSuccess(false);
+      setResumeFileName(file.name);
+
+      const isDocx = file.name.toLowerCase().endsWith(".docx") || file.name.toLowerCase().endsWith(".doc");
+      const isPdf = file.name.toLowerCase().endsWith(".pdf") || file.type === "application/pdf";
+
+      if (isDocx) {
+        setResumeUrl(null);
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await mammoth.convertToHtml({ arrayBuffer });
+          setResumeDocxHtml(result.value || "<p>Could not format document.</p>");
+        } catch {
+          const text = await file.text();
+          setResumeDocxHtml(`<pre class="whitespace-pre-wrap font-sans text-xs">${text}</pre>`);
+        }
+      } else if (isPdf) {
+        setResumeDocxHtml(null);
+        const fileUrl = URL.createObjectURL(file);
+        setResumeUrl(fileUrl);
+      } else {
+        // Plain text / other documents
+        setResumeUrl(null);
+        const text = await file.text();
+        setResumeDocxHtml(`<pre class="whitespace-pre-wrap font-sans text-xs p-4">${text}</pre>`);
+      }
+
+      // 1. Upload to AWS S3 in background & save URL to DB
+      uploadResumeToS3(file).then((res) => {
+        if (res?.resumeUrl) {
+          setResumeUrl(res.resumeUrl);
+        }
+      }).catch((err) => {
+        console.warn("AWS S3 upload error (non-fatal):", err);
+      });
+
+      // 2. Parse structured data with AI
       const parsed = await uploadAndParseResume(file);
 
       setExtractedData(parsed);
@@ -59,13 +102,13 @@ export default function ProfilePage() {
 
       setForm((prev) => ({
         ...prev,
-        headline: parsed.headline || prev.headline,
-        summary: parsed.summary || prev.summary,
+        headline: parsed.headline || "",
+        summary: parsed.summary || "",
         phone: parsed.phone || prev.phone,
-        skills: Array.from(new Set([...prev.skills, ...(parsed.skills || [])])),
-        targetRoles: Array.from(new Set([...prev.targetRoles, ...(parsed.targetRoles || [])])),
+        skills: parsed.skills && parsed.skills.length > 0 ? parsed.skills : prev.skills,
+        targetRoles: parsed.targetRoles && parsed.targetRoles.length > 0 ? parsed.targetRoles : prev.targetRoles,
         experienceLevel: parsed.experienceLevel || prev.experienceLevel,
-        yearsOfExp: parsed.yearsOfExp || prev.yearsOfExp,
+        yearsOfExp: parsed.yearsOfExp ?? prev.yearsOfExp,
       }));
 
       setParseSuccess(true);
@@ -101,6 +144,29 @@ export default function ProfilePage() {
     })();
   }, []);
 
+  // Lock body scroll and listen to ESC key when any modal is open
+  useEffect(() => {
+    const isAnyModalOpen = showResumeModal || showPreviewModal;
+    if (isAnyModalOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowResumeModal(false);
+        setShowPreviewModal(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showResumeModal, showPreviewModal]);
+
   const { data: profile, isLoading } = useQuery({
     queryKey: ["profile"],
     queryFn: getMyProfile,
@@ -125,6 +191,9 @@ export default function ProfilePage() {
         noticePeriod: profile.noticePeriod || "",
         workAuthorization: profile.workAuthorization || "",
       });
+      if (profile.resumeUrl && !resumeUrl) {
+        setResumeUrl(profile.resumeUrl);
+      }
     }
   }, [profile]);
 
@@ -241,18 +310,34 @@ export default function ProfilePage() {
                   <p className="text-[13px] text-slate-500 mt-0.5 leading-normal">
                     Upload your PDF resume to extract skills, headline, experience, and target roles automatically.
                   </p>
+                  {resumeFileName && (
+                    <p className="text-xs text-emerald-600 font-medium mt-1 flex items-center gap-1">
+                      <FileText className="h-3.5 w-3.5" /> {resumeFileName}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0 w-full md:w-auto">
+              <div className="flex items-center gap-2 shrink-0 w-full md:w-auto flex-wrap md:flex-nowrap">
+                {(resumeUrl || resumeDocxHtml || profile?.resumeUrl) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowResumeModal(true)}
+                    className="border-slate-200 text-slate-700 hover:bg-slate-50 text-xs h-10 px-3.5 flex items-center gap-1.5 rounded-xl shadow-xs"
+                  >
+                    <Eye className="h-4 w-4 text-blue-600" />
+                    View Resume
+                  </Button>
+                )}
                 {extractedData && (
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => setShowPreviewModal(true)}
-                    className="border-slate-200 text-slate-700 text-xs h-10 px-3 flex items-center gap-1.5"
+                    className="border-slate-200 text-slate-700 hover:bg-slate-50 text-xs h-10 px-3 flex items-center gap-1.5 rounded-xl shadow-xs"
                   >
-                    <Eye className="h-4 w-4 text-slate-500" />
+                    <Sparkles className="h-4 w-4 text-yellow-500" />
                     Inspect AI Data
                   </Button>
                 )}
@@ -276,7 +361,7 @@ export default function ProfilePage() {
                     ) : (
                       <>
                         <Upload className="h-4 w-4" />
-                        Upload Resume (PDF, DOCX)
+                        {resumeUrl || profile?.resumeUrl ? "Replace Resume (PDF)" : "Upload Resume (PDF, DOCX)"}
                       </>
                     )}
                   </Button>
@@ -290,111 +375,160 @@ export default function ProfilePage() {
       {/* AI Resume Inspection Modal */}
       <AnimatePresence>
         {showPreviewModal && extractedData && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div
+            key="ai-preview-modal"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowPreviewModal(false);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-slate-950/70 backdrop-blur-xl"
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-slate-200/80 max-w-xl w-full max-h-[82vh] overflow-y-auto custom-scrollbar p-6 space-y-5"
+              key="ai-preview-content"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="bg-white rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.25)] border border-slate-200/80 max-w-xl w-full max-h-[85vh] overflow-y-auto custom-scrollbar p-6 md:p-7 space-y-6"
             >
+              {/* Header */}
               <div className="flex items-start justify-between">
-                <div>
-                  <Badge className="bg-slate-100 text-slate-700 border-0 text-[10px] font-semibold tracking-wider uppercase mb-1.5">
-                    PARSED RESUME SUMMARY
-                  </Badge>
-                  <h2 className="text-xl font-bold text-[#111827] tracking-tight">
-                    Extracted Resume Data
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Review what Gemini AI parsed from your PDF resume.
-                  </p>
+                <div className="flex items-center gap-3">
+                  <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-amber-50 to-yellow-100/80 border border-amber-200/60 flex items-center justify-center text-amber-600 shadow-xs shrink-0">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                        AI Extracted Profile
+                      </h2>
+                      <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200/80 text-[10px] font-semibold px-2 py-0.5 rounded-md">
+                        Parsed
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Structured information parsed by Gemini AI from your resume.
+                    </p>
+                  </div>
                 </div>
+
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => setShowPreviewModal(false)}
-                  className="rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                  className="rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 h-8 w-8"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
 
-              {/* Extracted Headline & Summary */}
-              <div className="space-y-3 bg-slate-50/80 p-4 rounded-xl border border-slate-200/60 text-xs text-slate-700">
-                <div>
-                  <span className="font-semibold text-[#111827] block mb-1">Headline:</span>
-                  <p className="bg-white p-3 rounded-lg border border-slate-200/80 text-[#111827] font-medium leading-normal">
-                    {extractedData.headline || "N/A"}
+              {/* Headline Card */}
+              {extractedData.headline && (
+                <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
+                    <User className="h-3.5 w-3.5 text-blue-600" />
+                    <span>Headline</span>
+                  </div>
+                  <p className="text-sm font-medium text-slate-900 bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs">
+                    {extractedData.headline}
                   </p>
                 </div>
-                <div>
-                  <span className="font-semibold text-[#111827] block mb-1">Summary:</span>
-                  <p className="bg-white p-3 rounded-lg border border-slate-200/80 text-slate-600 leading-relaxed">
-                    {extractedData.summary || "N/A"}
+              )}
+
+              {/* Summary Card */}
+              {extractedData.summary && (
+                <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
+                    <FileText className="h-3.5 w-3.5 text-indigo-600" />
+                    <span>AI Professional Summary</span>
+                  </div>
+                  <p className="text-xs text-slate-700 leading-relaxed bg-white p-3.5 rounded-xl border border-slate-200/80 shadow-xs">
+                    {extractedData.summary}
                   </p>
                 </div>
-              </div>
+              )}
 
-              {/* Extracted Skills */}
-              <div className="space-y-2">
-                <span className="font-semibold text-[#111827] text-xs flex items-center gap-1.5">
-                  <Code className="h-3.5 w-3.5 text-slate-700" /> Extracted Skills ({extractedData.skills?.length || 0}):
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {extractedData.skills?.map((sk: string, idx: number) => (
-                    <Badge key={idx} className="bg-slate-100 hover:bg-slate-200/60 text-slate-800 border-slate-200/80 text-xs font-medium transition-colors">
-                      {sk}
-                    </Badge>
-                  )) || <span className="text-xs text-slate-400">None extracted</span>}
-                </div>
-              </div>
-
-              {/* Extracted Target Roles & Experience */}
-              <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/60">
-                <div>
-                  <span className="font-semibold text-[#111827] block mb-1">Target Roles:</span>
-                  <div className="flex flex-wrap gap-1">
-                    {extractedData.targetRoles?.map((r: string, idx: number) => (
-                      <Badge key={idx} className="bg-white text-slate-700 border border-slate-200 text-[11px] font-medium">
-                        {r}
+              {/* Skills Card */}
+              {extractedData.skills && extractedData.skills.length > 0 && (
+                <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                      <Code className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Extracted Skills</span>
+                    </div>
+                    <span className="text-[11px] font-medium text-slate-400">
+                      {extractedData.skills.length} skills found
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {extractedData.skills.map((sk: string, idx: number) => (
+                      <Badge
+                        key={idx}
+                        className="bg-white hover:bg-slate-100 text-slate-800 border-slate-200/90 text-xs font-medium px-2.5 py-1 rounded-lg shadow-2xs transition-colors"
+                      >
+                        {sk}
                       </Badge>
-                    )) || <span className="text-slate-400">N/A</span>}
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Target Roles & Experience Level */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2">
+                    <Target className="h-3.5 w-3.5 text-rose-500" />
+                    <span>Target Roles</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {extractedData.targetRoles?.length > 0 ? (
+                      extractedData.targetRoles.map((r: string, idx: number) => (
+                        <Badge key={idx} className="bg-white text-slate-800 border-slate-200 text-xs font-medium">
+                          {r}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-400">None detected</span>
+                    )}
                   </div>
                 </div>
 
-                <div>
-                  <span className="font-semibold text-[#111827] block mb-1">Experience:</span>
-                  <span className="text-slate-700 font-medium">
-                    {extractedData.experienceLevel || "MID"} ({extractedData.yearsOfExp || 0} years)
-                  </span>
+                <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-2">
+                    <Briefcase className="h-3.5 w-3.5 text-amber-500" />
+                    <span>Experience Level</span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 flex items-center justify-between">
+                    <span>{extractedData.experienceLevel || "ENTRY"}</span>
+                    <span className="text-slate-400">~{extractedData.yearsOfExp || 0} years</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
                 <Button
                   variant="outline"
                   onClick={() => setShowPreviewModal(false)}
-                  className="rounded-xl border-slate-200/80 text-slate-600 hover:bg-slate-50 text-xs px-4 h-9 font-medium transition-all"
+                  className="rounded-xl border-slate-200/80 text-slate-600 hover:bg-slate-50 text-xs px-4 h-9.5 font-medium transition-all"
                 >
                   Close
                 </Button>
                 <Button
-                  variant="outline"
                   disabled={mutation.isPending}
                   onClick={() => {
                     setShowPreviewModal(false);
                     mutation.mutate(form);
                   }}
-                  className="rounded-xl border-slate-200/80 text-slate-700 hover:bg-slate-50 text-xs px-4 h-9 font-medium transition-all flex items-center gap-1.5"
+                  className="rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs px-5 h-9.5 font-medium transition-all flex items-center gap-1.5 shadow-sm"
                 >
                   {mutation.isPending ? (
                     <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-500" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-300" />
                       Saving to Database...
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
                       Confirm & Save Profile
                     </>
                   )}
@@ -403,6 +537,17 @@ export default function ProfilePage() {
             </motion.div>
           </div>
         )}
+
+        {/* Dedicated Resume PDF / DOCX Viewer Modal */}
+        <ResumeViewerModal
+          key="resume-viewer-modal"
+          isOpen={showResumeModal && Boolean(resumeUrl || resumeDocxHtml || profile?.resumeUrl)}
+          onClose={() => setShowResumeModal(false)}
+          fileUrl={resumeUrl || profile?.resumeUrl}
+          docxHtml={resumeDocxHtml}
+          fileName={resumeFileName || (profile?.resumeUrl ? "Resume.pdf" : "Uploaded Resume")}
+          isDocx={Boolean(resumeDocxHtml || resumeFileName.toLowerCase().endsWith(".docx") || resumeFileName.toLowerCase().endsWith(".doc"))}
+        />
       </AnimatePresence>
 
       {/* Basic Info */}
