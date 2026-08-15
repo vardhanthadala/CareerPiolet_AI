@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
-import PyPDF2
+import fitz
 import io
 import json
 import os
@@ -150,9 +150,9 @@ async def parse_resume(file: UploadFile = File(...)):
         elif filename_lower.endswith(".txt"):
             extracted_text = contents.decode("utf-8", errors="ignore")
         else:
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(contents))
-            for page in pdf_reader.pages:
-                extracted_text += page.extract_text() or ""
+            with fitz.open(stream=contents, filetype="pdf") as doc:
+                for page in doc:
+                    extracted_text += page.get_text("text") + "\n"
 
         if not extracted_text.strip():
             raise HTTPException(status_code=400, detail="Could not extract readable text from file.")
