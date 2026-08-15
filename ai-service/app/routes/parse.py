@@ -188,7 +188,7 @@ async def parse_resume(file: UploadFile = File(...)):
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     client.models.generate_content,
-                    model="gemini-3-flash-preview",
+                    model="gemini-3.5-flash",
                     contents=prompt,
                     config=genai.types.GenerateContentConfig(
                         response_mime_type="application/json"
@@ -219,13 +219,13 @@ async def parse_resume(file: UploadFile = File(...)):
             return ParseResumeResponse(**parsed_data)
 
         except Exception as gemini_err:
-            print(f"Gemini API parse error: {gemini_err}")
-            # Try fallback model if preview fails
+            print(f"Gemini API parse error on primary model: {gemini_err}")
+            # Try secondary model
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
                         client.models.generate_content,
-                        model="gemini-2.5-flash",
+                        model="gemini-flash-latest",
                         contents=prompt,
                         config=genai.types.GenerateContentConfig(
                             response_mime_type="application/json"

@@ -123,14 +123,31 @@ Return ONLY valid JSON. No markdown, no code fences, no explanation."""
 
     try:
         client = genai.Client(api_key=settings.gemini_api_key)
-        response = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.models.generate_content,
-                model="gemini-3-flash-preview",
-                contents=prompt,
-            ),
-            timeout=45.0
-        )
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model="gemini-3.5-flash",
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                ),
+                timeout=45.0
+            )
+        except Exception as e:
+            print(f"Tailor primary model error: {e}, attempting gemini-flash-latest...")
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.models.generate_content,
+                    model="gemini-flash-latest",
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                ),
+                timeout=30.0
+            )
         
         text_resp = response.text.strip()
         # Clean markdown fences
@@ -148,14 +165,11 @@ Return ONLY valid JSON. No markdown, no code fences, no explanation."""
             experienceBullets=parsed.get("experienceBullets", []),
             projectBullets=parsed.get("projectBullets", []),
             coverLetter=parsed.get("coverLetter", ""),
-            matchScore=parsed.get("matchScore", 50),
+            matchScore=parsed.get("matchScore", 75),
             keySkillMatches=parsed.get("keySkillMatches", []),
             missingSkills=parsed.get("missingSkills", []),
         )
 
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="AI generation timed out. Please try again.")
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse AI response: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+        print(f"Gemini tailoring error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate tailored content: {str(e)}")
